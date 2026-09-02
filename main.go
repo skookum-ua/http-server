@@ -1,6 +1,9 @@
 package main
 
+import _ "github.com/lib/pq"
+import "github.com/joho/godotenv"
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,10 +12,13 @@ import (
 	"time"
 	"strings"
 	"slices"
+	"os"
+	"github.com/skookum-ua/http-server/internal/database"
 )
 
 type apiConfig struct {
 fileserverHits atomic.Int32
+dbQueries *database.Queries
 }
 
 func censore(chirp string) string{
@@ -107,13 +113,24 @@ func handlerValidate(w http.ResponseWriter, r *http.Request){
 }
 
 func main(){
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil{
+		fmt.Printf("Error opening database: %s", err)
+	}
+	dbQueries := database.New(db)
+
 	var apiCfg apiConfig
+	apiCfg.dbQueries = dbQueries
+
 	mux := http.NewServeMux()
 	mux.Handle("/app/",  http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz" , handlerHealth)
 	mux.HandleFunc("GET /admin/metrics" , apiCfg.handlerHits)
 	mux.HandleFunc("POST /admin/reset" , apiCfg.handlerReset)
 	mux.HandleFunc("POST /api/validate_chirp" , handlerValidate)
+	
 	server := &http.Server{}
 	server.Addr = ":8080"
 	server.Handler = mux
