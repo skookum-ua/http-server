@@ -7,6 +7,7 @@ import (
 		"fmt"
 		"github.com/google/uuid"
 		"github.com/skookum-ua/http-server/internal/database"
+		"github.com/skookum-ua/http-server/internal/auth"
 )
 
 func handlerHealth(w http.ResponseWriter,h *http.Request){
@@ -82,6 +83,7 @@ func handlerValidate(w http.ResponseWriter, r *http.Request){
 func (c *apiConfig) handlerCreateUsers(w http.ResponseWriter, r *http.Request){
 	type parameters struct {
         Email string `json:"email"`
+		Password string `json:"password"`
     }
 
 	decoder := json.NewDecoder(r.Body)
@@ -93,14 +95,23 @@ func (c *apiConfig) handlerCreateUsers(w http.ResponseWriter, r *http.Request){
 		respondeWithError(w, 500, "Error decoding parameters")
 		return
     }
-	res:=User{}
-	resNotNull, err := c.dbQueries.CreateUser(r.Context(), params.Email)
+	
+	hashedParams := database.CreateUserParams{}
+	hashedParams.Email = params.Email
+	hashedParams.HashedPasswords, err = auth.HashPassword(params.Password)
+	if err != nil {
+		log.Printf("Error hadhing password: %s", err)
+		respondeWithError(w, 500, "Error hadhing password")
+		return
+	}
+	resNotNull, err := c.dbQueries.CreateUser(r.Context(), hashedParams)
 	if err != nil {
 		log.Printf("Error creating user: %s", err)
 
 		respondeWithError(w, 500, "Error creating user")
 		return
 	}
+	res:=User{}
 	res.ID = resNotNull.ID
 	res.CreatedAt = resNotNull.CreatedAt
 	res.UpdatedAt = resNotNull.UpdatedAt
@@ -176,4 +187,45 @@ func(c *apiConfig) handlerGetChirpsId(w http.ResponseWriter, r *http.Request){
 	respondWithJSON(w, 200, respChirp)
 }
 
+func(c *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request){
+	type parameters struct {
+        Password string `json:"password"`
+		Email string `json:"email"`
+    }
+
+	decoder := json.NewDecoder(r.Body)
+    params := parameters{}
+    err := decoder.Decode(&params)
+    if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+
+		respondeWithError(w, 401, "Error decoding parameters")
+		return
+    }
+	user, err := c.dbQueries.GetUserByID(r.Context(),params.Email)
+	if err != nil {
+		log.Printf("No registered user with such email: %s", err)
+
+		respondeWithError(w, 401, "No registered user with such email")
+		return
+    }
+
+	passCheck, err := auth.CheckPasswordHash(params.Password, user.HashedPasswords)
+	if err != nil || passCheck == false {
+		log.Printf("Error checking password: %s", err)
+
+		respondeWithError(w, 401, "Error checking password")
+		return
+    }
+
+	res:=User{}
+	res.ID = user.ID
+	res.CreatedAt = user.CreatedAt
+	res.UpdatedAt = user.UpdatedAt
+	res.Email = user.Email
+	respondWithJSON(w, 200, res)
+
+
+
+}
 
