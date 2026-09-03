@@ -5,6 +5,7 @@ import (
 		"encoding/json"
 		"net/http"
 		"fmt"
+		"time"
 		"github.com/google/uuid"
 		"github.com/skookum-ua/http-server/internal/database"
 		"github.com/skookum-ua/http-server/internal/auth"
@@ -123,12 +124,27 @@ func (c *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request){
 
 	type parameters struct {
         Body string `json:"body"`
-		UserId uuid.UUID `json:"user_id"`
+    }
+
+	token,err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Printf("Error geting token: %s", err)
+
+		respondeWithError(w, 401, "Error geting token")
+		return
+    }
+
+	id, err := auth.ValidateJWT(token, c.secret)
+	if err != nil {
+		log.Printf("Error validating token: %s", err)
+
+		respondeWithError(w, 401, "Error validating token")
+		return
     }
 
     decoder := json.NewDecoder(r.Body)
     params := parameters{}
-    err := decoder.Decode(&params)
+    err = decoder.Decode(&params)
     if err != nil {
 		log.Printf("Error decoding parameters: %s", err)
 
@@ -141,7 +157,7 @@ func (c *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request){
 	}
 	chirpParams := database.CreateChirpParams{
 		Body:   censore(params.Body),
-		UserID: params.UserId,
+		UserID: id,
 	}
 	chirp, err := c.dbQueries.CreateChirp(r.Context(), chirpParams )
 	if err != nil {
@@ -191,8 +207,10 @@ func(c *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request){
 	type parameters struct {
         Password string `json:"password"`
 		Email string `json:"email"`
+		Expires *int `json:"expires_in_seconds,omitempty"`
     }
 
+	expiresIn := 1 * time.Hour
 	decoder := json.NewDecoder(r.Body)
     params := parameters{}
     err := decoder.Decode(&params)
@@ -202,6 +220,10 @@ func(c *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request){
 		respondeWithError(w, 401, "Error decoding parameters")
 		return
     }
+	if params.Expires != nil{
+		expiresIn = time.Duration(*params.Expires)
+	}
+
 	user, err := c.dbQueries.GetUserByID(r.Context(),params.Email)
 	if err != nil {
 		log.Printf("No registered user with such email: %s", err)
@@ -218,11 +240,23 @@ func(c *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request){
 		return
     }
 
+	secret := c.secret
+
+	tokenString, err := auth.MakeJWT(user.ID, secret, expiresIn)
+	if err != nil{
+		log.Printf("Error creating token: %s", err)
+
+		respondeWithError(w, 500, "Error creating token")
+		return
+    }
+
+
 	res:=User{}
 	res.ID = user.ID
 	res.CreatedAt = user.CreatedAt
 	res.UpdatedAt = user.UpdatedAt
 	res.Email = user.Email
+	res.Token = tokenString
 	respondWithJSON(w, 200, res)
 
 

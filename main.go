@@ -19,6 +19,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries *database.Queries
 	platform string
+	secret string
 }
 
 type User struct {
@@ -26,6 +27,7 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Token     string    `json:"token"`
 }
 
 type Chirp struct {
@@ -41,6 +43,7 @@ func main(){
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	platf := os.Getenv("PLATFORM")
+	sec := os.Getenv("SECRET")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil{
 		fmt.Printf("Error opening database: %s", err)
@@ -50,6 +53,7 @@ func main(){
 	var apiCfg apiConfig
 	apiCfg.dbQueries = dbQueries
 	apiCfg.platform = platf
+	apiCfg.secret = sec
 
 	mux := http.NewServeMux()
 	mux.Handle("/app/",  http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
