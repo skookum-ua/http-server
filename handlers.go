@@ -101,8 +101,8 @@ func (c *apiConfig) handlerCreateUsers(w http.ResponseWriter, r *http.Request) {
 	hashedParams.Email = params.Email
 	hashedParams.HashedPasswords, err = auth.HashPassword(params.Password)
 	if err != nil {
-		log.Printf("Error hadhing password: %s", err)
-		respondeWithError(w, 500, "Error hadhing password")
+		log.Printf("Error hashing password: %s", err)
+		respondeWithError(w, 500, "Error hashing password")
 		return
 	}
 	resNotNull, err := c.dbQueries.CreateUser(r.Context(), hashedParams)
@@ -319,4 +319,69 @@ func (c *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
     w.WriteHeader(204)
+}
+
+func (c *apiConfig) handlerUpdateUsers(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Printf("Error geting token: %s", err)
+
+		respondeWithError(w, 401, "Error geting token")
+		return
+	}
+
+	id, err := auth.ValidateJWT(token, c.secret)
+	if err != nil {
+		log.Printf("Error validating token: %s", err)
+
+		respondeWithError(w, 401, "Error validating token")
+		return
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+
+		respondeWithError(w, 500, "Error decoding parameters")
+		return
+	}
+
+
+
+	updateParams := database.UpdateUserParams{}
+	updateParams.Email = params.Email
+	updateParams.ID = id
+	updateParams.HashedPasswords, err = auth.HashPassword(params.Password)
+	if err != nil {
+		log.Printf("Error hadhing password: %s", err)
+		respondeWithError(w, 401, "Error hadhing password")
+		return
+	}
+	user, err := c.dbQueries.UpdateUser(r.Context(), updateParams)
+	if err != nil {
+		log.Printf("Error updating password: %s", err)
+		respondeWithError(w, 401, "Error updating password")
+		return
+	}
+	type response struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+	res:=response{
+		ID: user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email: user.Email,
+	}
+
+	respondWithJSON(w, 200, res)
 }
