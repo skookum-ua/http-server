@@ -20,6 +20,7 @@ type apiConfig struct {
 	dbQueries *database.Queries
 	platform string
 	secret string
+	polka_key string
 }
 
 type User struct {
@@ -29,6 +30,7 @@ type User struct {
 	Email     string    `json:"email"`
 	Token     string    `json:"token"`
 	RefToken  string	`json:"refresh_token"`
+	IsRed 		bool 	`json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -45,6 +47,7 @@ func main(){
 	dbURL := os.Getenv("DB_URL")
 	platf := os.Getenv("PLATFORM")
 	sec := os.Getenv("SECRET")
+	polka_key := os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil{
 		fmt.Printf("Error opening database: %s", err)
@@ -55,6 +58,7 @@ func main(){
 	apiCfg.dbQueries = dbQueries
 	apiCfg.platform = platf
 	apiCfg.secret = sec
+	apiCfg.polka_key = polka_key
 
 	mux := http.NewServeMux()
 	mux.Handle("/app/",  http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
@@ -64,12 +68,14 @@ func main(){
 	mux.HandleFunc("POST /api/validate_chirp" , handlerValidate)
 	mux.HandleFunc("POST /api/users" , apiCfg.handlerCreateUsers)
 	mux.HandleFunc("POST /api/chirps" , apiCfg.handlerChirps)
-	mux.HandleFunc("GET /api/chirps" , apiCfg.handlerAllChirps)
+	mux.HandleFunc("GET /api/chirps/" , apiCfg.handlerAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpsId)
 	mux.HandleFunc("POST /api/login" , apiCfg.handlerLogin)
 	mux.HandleFunc("POST /api/refresh" , apiCfg.handlerRefresh)
 	mux.HandleFunc("POST /api/revoke" , apiCfg.handlerRevoke)
 	mux.HandleFunc("PUT /api/users" , apiCfg.handlerUpdateUsers)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerDeleteChirp)
+	mux.HandleFunc("POST /api/polka/webhooks" , apiCfg.handlerUserToRedMembership)
 
 	server := &http.Server{}
 	server.Addr = ":8080"

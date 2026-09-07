@@ -74,7 +74,7 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		
 }
 
-func GetBearerToken(headers http.Header) (string, error){
+func GetBearerTokenOrApiKey(headers http.Header) (string, error){
 	auth :=  headers.Get("Authorization")
 	if auth == ""{
 		return "", errors.New("NO token")
@@ -91,3 +91,4 @@ func MakeRefreshToken() string{
 	rand.Read(key)
 	return hex.EncodeToString(key)
 }
+

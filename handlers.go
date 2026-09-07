@@ -117,6 +117,7 @@ func (c *apiConfig) handlerCreateUsers(w http.ResponseWriter, r *http.Request) {
 	res.CreatedAt = resNotNull.CreatedAt
 	res.UpdatedAt = resNotNull.UpdatedAt
 	res.Email = resNotNull.Email
+	res.IsRed = resNotNull.IsChirpyRed
 	respondWithJSON(w, 201, res)
 }
 
@@ -126,7 +127,7 @@ func (c *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 		Body string `json:"body"`
 	}
 
-	token, err := auth.GetBearerToken(r.Header)
+	token, err := auth.GetBearerTokenOrApiKey(r.Header)
 	if err != nil {
 		log.Printf("Error geting token: %s", err)
 
@@ -176,7 +177,17 @@ func (c *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *apiConfig) handlerAllChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := c.dbQueries.GetChirps(r.Context())
+	authorIDStr := r.URL.Query().Get("author_id")
+	authorID := uuid.Nil
+	if authorIDStr != "" {
+		parsedAuthorID, err := uuid.Parse(authorIDStr)
+		if err != nil {
+			respondeWithError(w, 400, "Invalid author ID")
+			return
+		}
+		authorID = parsedAuthorID
+	}
+	chirps, err := c.dbQueries.GetChirps(r.Context(), authorID)
 	if err != nil {
 		log.Printf("Error geting chirps: %s", err)
 		respondeWithError(w, 500, "Error geting chirp")
@@ -261,11 +272,12 @@ func (c *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	res.Email = user.Email
 	res.Token = tokenString
 	res.RefToken = refresh_token
+	res.IsRed = user.IsChirpyRed
 	respondWithJSON(w, 200, res)
 }
 
 func (c *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
-	ref_token, err := auth.GetBearerToken(r.Header)
+	ref_token, err := auth.GetBearerTokenOrApiKey(r.Header)
 	if err != nil {
 		log.Printf("Error checking token: %s", err)
 		respondeWithError(w, 401, "Error checking token")
@@ -301,7 +313,7 @@ func (c *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
-	ref_token, err := auth.GetBearerToken(r.Header)
+	ref_token, err := auth.GetBearerTokenOrApiKey(r.Header)
 	if err != nil {
 		log.Printf("Error checking token: %s", err)
 		respondeWithError(w, 500, "Error checking token")
@@ -312,13 +324,13 @@ func (c *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
 	revTokPar.Token = ref_token
 	revTokPar.RevokedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	revTokPar.UpdatedAt = time.Now()
-	err = c.dbQueries.RevokeToken(r.Context(),revTokPar)
+	err = c.dbQueries.RevokeToken(r.Context(), revTokPar)
 	if err != nil {
 		log.Printf("Error revoking token: %s", err)
 		respondeWithError(w, 500, "Error revoking token")
 		return
 	}
-    w.WriteHeader(204)
+	w.WriteHeader(204)
 }
 
 func (c *apiConfig) handlerUpdateUsers(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +339,7 @@ func (c *apiConfig) handlerUpdateUsers(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 	}
 
-	token, err := auth.GetBearerToken(r.Header)
+	token, err := auth.GetBearerTokenOrApiKey(r.Header)
 	if err != nil {
 		log.Printf("Error geting token: %s", err)
 
@@ -353,8 +365,6 @@ func (c *apiConfig) handlerUpdateUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
-
 	updateParams := database.UpdateUserParams{}
 	updateParams.Email = params.Email
 	updateParams.ID = id
@@ -375,13 +385,95 @@ func (c *apiConfig) handlerUpdateUsers(w http.ResponseWriter, r *http.Request) {
 		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
 		Email     string    `json:"email"`
+		IsRed     bool      `json:"is_chirpy_red"`
 	}
-	res:=response{
-		ID: user.ID,
+	res := response{
+		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
-		Email: user.Email,
+		Email:     user.Email,
+		IsRed:     user.IsChirpyRed,
 	}
 
 	respondWithJSON(w, 200, res)
+}
+
+func (c *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerTokenOrApiKey(r.Header)
+	if err != nil {
+		log.Printf("Error geting token: %s", err)
+
+		respondeWithError(w, 401, "Error geting token")
+		return
+	}
+
+	id, err := auth.ValidateJWT(token, c.secret)
+	if err != nil {
+		log.Printf("Error validating token: %s", err)
+
+		respondeWithError(w, 401, "Error validating token")
+		return
+	}
+
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondeWithError(w, 400, "Invalid chirp ID")
+		return
+	}
+	chirp, err := c.dbQueries.GetsChirpsId(r.Context(), chirpID)
+	if err != nil {
+		respondeWithError(w, 404, "No chirp found")
+		return
+	}
+	if chirp.UserID != id {
+		respondeWithError(w, 403, "User cant delete this chirp")
+		return
+	}
+	err = c.dbQueries.DeleteCirpByID(r.Context(), chirpID)
+	if err != nil {
+		respondeWithError(w, 500, "Error deleting chirp")
+		return
+	}
+	w.WriteHeader(204)
+}
+
+func (c *apiConfig) handlerUserToRedMembership(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID uuid.UUID `json:"user_id"`
+		} `json:"data"`
+	}
+	apiKey, err := auth.GetBearerTokenOrApiKey(r.Header)
+	if err != nil || apiKey != c.polka_key {
+		log.Printf("Wrong API KEY")
+
+		respondeWithError(w, 401, "Wrong API key")
+		return
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+
+		respondeWithError(w, 400, "Error decoding parameters")
+		return
+	}
+
+	if params.Event != "user.upgraded" {
+		log.Printf("Event not user.upgraded")
+
+		w.WriteHeader(204)
+		return
+	}
+	err = c.dbQueries.UserToRedMembership(r.Context(), params.Data.UserID)
+	if err != nil {
+		log.Printf("User was not upgraded: %s", err)
+
+		respondeWithError(w, 404, "User was not upgraded")
+		return
+	}
+	w.WriteHeader(204)
 }
