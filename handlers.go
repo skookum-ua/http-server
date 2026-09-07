@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -178,7 +179,14 @@ func (c *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 
 func (c *apiConfig) handlerAllChirps(w http.ResponseWriter, r *http.Request) {
 	authorIDStr := r.URL.Query().Get("author_id")
+	sortOrder := r.URL.Query().Get("sort")
+	if sortOrder != "desc" {
+		sortOrder = "asc"
+	}
 	authorID := uuid.Nil
+	var chirps []database.Chirp
+	var err error
+
 	if authorIDStr != "" {
 		parsedAuthorID, err := uuid.Parse(authorIDStr)
 		if err != nil {
@@ -186,17 +194,23 @@ func (c *apiConfig) handlerAllChirps(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		authorID = parsedAuthorID
+		chirps, err = c.dbQueries.GetChirpsByAuthor(r.Context(), authorID)
+	} else {
+		chirps, err = c.dbQueries.GetChirps(r.Context())
 	}
-	chirps, err := c.dbQueries.GetChirps(r.Context(), authorID)
 	if err != nil {
 		log.Printf("Error geting chirps: %s", err)
 		respondeWithError(w, 500, "Error geting chirp")
 		return
 	}
+
 	newChirps := make([]Chirp, len(chirps))
 	for i, chirp := range chirps {
 		newChirps[i] = dbChirpToResponse(chirp)
 	}
+	if sortOrder == "desc" {
+	sort.Slice(newChirps, func(i, j int) bool { return newChirps[i].CreatedAt.After(newChirps[j].CreatedAt) })
+	}else{sort.Slice(newChirps, func(i, j int) bool { return newChirps[i].CreatedAt.Before(newChirps[j].CreatedAt) })}
 	respondWithJSON(w, 200, newChirps)
 }
 func (c *apiConfig) handlerGetChirpsId(w http.ResponseWriter, r *http.Request) {
